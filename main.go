@@ -91,6 +91,24 @@ func getRandomLanguage() string {
 	return languages[rand.Intn(len(languages))]
 }
 
+func cleanURL(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+
+	// Get query params
+	q := parsedURL.Query()
+
+	// Remove trackingId
+	q.Del("trackingId")
+
+	// Re-encode query params without trackingId
+	parsedURL.RawQuery = q.Encode()
+
+	return parsedURL.String(), nil
+}
+
 func buildURL(locationType string) *url.URL {
 	u, _ := url.Parse(baseURL)
 	params := url.Values{}
@@ -190,11 +208,17 @@ func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 	doc.Find(".jobs-search__results-list li").Each(func(i int, s *goquery.Selection) {
 		var job Job
 		urn, _ := s.Find(".base-card").Attr("data-entity-urn")
+		urlFromHTML, _ := s.Find(".base-card__full-link").Attr("href")
+		linkURL, err := cleanURL(urlFromHTML)
+		if err != nil {
+			fmt.Printf("error parsing job link: %v:%v\n", urlFromHTML, err.Error())
+			return
+		}
 		job.Id = strings.TrimPrefix(urn, "urn:li:jobPosting:")
 		job.Title = strings.TrimSpace(s.Find(".base-search-card__title").Text())
 		job.Company = strings.TrimSpace(s.Find(".base-search-card__subtitle a").Text())
 		job.Location = strings.TrimSpace(s.Find(".job-search-card__location").Text())
-		job.URL, _ = s.Find(".base-card__full-link").Attr("href")
+		job.URL = linkURL
 		job.PostedAt = strings.TrimSpace(s.Find(".job-search-card__listdate").Text())
 		jobs = append(jobs, job)
 	})
