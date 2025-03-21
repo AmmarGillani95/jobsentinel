@@ -26,7 +26,7 @@ import (
 // 5 mins 300
 const (
 	baseURL          = "https://www.linkedin.com/jobs/search/?"
-	keywords         = "Engineer OR Developer AND (Go OR Golang OR Typescript OR React OR AWS)"
+	keywords         = "Engineer OR Developer AND (Golang OR Typescript OR React)"
 	geoId            = "103644278" // USA
 	remote           = "2"         // remote
 	secondsSincePost = 600         // 10 minutes
