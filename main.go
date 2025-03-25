@@ -250,14 +250,21 @@ func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 
 // Sends email with job list
 func SendEmail(remoteJobs []Job, localJobs []Job, sesClient *ses.Client, ctx context.Context, email string) error {
-	var body string
-	body += "Remote Jobs:\n\n"
-	for _, job := range remoteJobs {
-		body += fmt.Sprintf("Title: %s\nCompany: %s\nLocation: %s\nLink: %s\n\n", job.Title, job.Company, job.Location, job.URL)
+	if len(remoteJobs) == 0 && len(localJobs) == 0 {
+		return nil
 	}
-	body += "Local Jobs:\n\n"
-	for _, job := range localJobs {
-		body += fmt.Sprintf("Title: %s\nCompany: %s\nLocation: %s\nLink: %s\n\n", job.Title, job.Company, job.Location, job.URL)
+	var body string
+	if len(remoteJobs) > 0 {
+		body += "Remote Jobs:\n\n"
+		for _, job := range remoteJobs {
+			body += fmt.Sprintf("Title: %s\nCompany: %s\nLocation: %s\nLink: %s\n\n", job.Title, job.Company, job.Location, job.URL)
+		}
+	}
+	if len(localJobs) > 0 {
+		body += "Local Jobs:\n\n"
+		for _, job := range localJobs {
+			body += fmt.Sprintf("Title: %s\nCompany: %s\nLocation: %s\nLink: %s\n\n", job.Title, job.Company, job.Location, job.URL)
+		}
 	}
 	subject := fmt.Sprintf("New LinkedIn Jobs Found! (%d jobs)", (len(remoteJobs) + len(localJobs)))
 	input := &ses.SendEmailInput{
@@ -333,7 +340,6 @@ func handler(ctx context.Context, event Event) error {
 
 	var newRemoteJobs []Job
 	for _, job := range remoteJobs {
-		fmt.Println("remote job", remoteJobs)
 		if !sentURNs[job.Id] {
 			newRemoteJobs = append(newRemoteJobs, job)
 			sentURNs[job.Id] = true // Mark for saving
