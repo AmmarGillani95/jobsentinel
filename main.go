@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ const (
 	s3Key            = "sent_jobs.json"
 	location         = "San Antonio"
 	distance         = "100"
+	maxApplicants    = 50
 )
 
 type Event struct {
@@ -78,6 +80,17 @@ var languages = []string{
 var blockedPosters = map[string]string{
 	"DataAnnotation": "true",
 	"Jobs via Dice":  "true",
+	"Jobot":          "true",
+}
+var blockedTitles = []string{
+	"intern",
+	"sales",
+	"field",
+	"electrical",
+	"mechanical",
+	"support",
+	"junior",
+	"entry",
 }
 
 func getRandomReferer() string {
@@ -167,7 +180,8 @@ func saveSentURNs(ctx context.Context, s3Client *s3.Client, bucket, key string, 
 	return err
 }
 
-// Mock function - replace with actual LinkedIn API logic
+var applicantRE *regexp.Regexp = regexp.MustCompile(`\d+`)
+
 func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 	url := buildURL(locationType)
 	fmt.Printf("Checking jobs on %s\n", url)
@@ -214,25 +228,42 @@ func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 			fmt.Printf("error parsing job link: %v:%v\n", urlFromHTML, err.Error())
 			return
 		}
+		applicantCount := s.Find("num-applicants__caption").Text()
+		match := applicantRE.FindString(applicantCount)
+		if match != "" {
+			applicantCountInt, err := strconv.Atoi(match)
+			if err != nil {
+				fmt.Printf("error parsing job link: %v:%v\n", urlFromHTML, err.Error())
+				return
+			}
+			if applicantCountInt > maxApplicants {
+				fmt.Printf("applicant count exceeds maximum: %d\n", applicantCountInt, err.Error())
+				return
+			}
+		}
 		job.Id = strings.TrimPrefix(urn, "urn:li:jobPosting:")
 		job.Title = strings.TrimSpace(s.Find(".base-search-card__title").Text())
 		job.Company = strings.TrimSpace(s.Find(".base-search-card__subtitle a").Text())
 		job.Location = strings.TrimSpace(s.Find(".job-search-card__location").Text())
 		job.URL = linkURL
 		job.PostedAt = strings.TrimSpace(s.Find(".job-search-card__listdate").Text())
-		jobs = append(jobs, job)
 	})
 
 	return jobs, nil
 }
 
 // Sends email with job list
-func SendEmail(jobs []Job, sesClient *ses.Client, subject string, ctx context.Context, email string) error {
+func SendEmail(remoteJobs []Job, localJobs []Job, sesClient *ses.Client, ctx context.Context, email string) error {
 	var body string
-	for _, job := range jobs {
+	body += "Remote Jobs:\n\n"
+	for _, job := range remoteJobs {
 		body += fmt.Sprintf("Title: %s\nCompany: %s\nLocation: %s\nLink: %s\n\n", job.Title, job.Company, job.Location, job.URL)
 	}
-
+	body += "Local Jobs:\n\n"
+	for _, job := range localJobs {
+		body += fmt.Sprintf("Title: %s\nCompany: %s\nLocation: %s\nLink: %s\n\n", job.Title, job.Company, job.Location, job.URL)
+	}
+	subject := fmt.Sprintf("New LinkedIn Jobs Found! (%d jobs)", (len(remoteJobs) + len(localJobs)))
 	input := &ses.SendEmailInput{
 		Destination: &types.Destination{
 			ToAddresses: []string{email},
@@ -256,12 +287,30 @@ func SendEmail(jobs []Job, sesClient *ses.Client, subject string, ctx context.Co
 
 func filterResults(jobs []Job) []Job {
 	var newJobs []Job
+
 	for _, job := range jobs {
-		if _, found := blockedPosters[job.Company]; !found {
-			newJobs = append(newJobs, job)
-		} else {
-			fmt.Printf("Filtered out job from poster: %s\n", job.Company)
+		// Check for blocked title
+		shouldBlock := false
+
+		for _, blockTitle := range blockedTitles {
+			if strings.Contains(strings.ToLower(job.Title), strings.ToLower(blockTitle)) {
+				fmt.Printf("Filtered out job by title: %s\n", job.Title)
+				shouldBlock = true
+				break
+			}
 		}
+		if shouldBlock {
+			continue // Skip this job entirely
+		}
+
+		// Check for blocked company
+		if _, found := blockedPosters[job.Company]; found {
+			fmt.Printf("Filtered out job from poster: %s\n", job.Company)
+			continue // Skip this job
+		}
+
+		// Passed all checks
+		newJobs = append(newJobs, job)
 	}
 	return newJobs
 }
@@ -301,15 +350,6 @@ func handler(ctx context.Context, event Event) error {
 		return nil
 	}
 
-	sesClient := ses.NewFromConfig(cfg)
-
-	subject := fmt.Sprintf("New Remote LinkedIn Jobs Found! (%d jobs)", len(filteredRemoteJobs))
-	err = SendEmail(filteredRemoteJobs, sesClient, subject, ctx, event.Email)
-	if err != nil {
-		return fmt.Errorf("failed to send email: %v", err)
-	}
-	fmt.Printf("Sent %d new remote jobs via email.\n", len(filteredRemoteJobs))
-
 	localJobs, err := FetchLinkedInJobs("local")
 	if err != nil {
 		return fmt.Errorf("failed to fetch local jobs: %v", err)
@@ -328,12 +368,13 @@ func handler(ctx context.Context, event Event) error {
 		fmt.Println("No new local jobs to send.")
 		return nil
 	}
-	subject = fmt.Sprintf("New Local LinkedIn Jobs Found! (%d jobs)", len(filteredLocalJobs))
-	err = SendEmail(filteredLocalJobs, sesClient, subject, ctx, event.Email)
+
+	sesClient := ses.NewFromConfig(cfg)
+	err = SendEmail(filteredRemoteJobs, filteredLocalJobs, sesClient, ctx, event.Email)
 	if err != nil {
 		return fmt.Errorf("failed to send email: %v", err)
 	}
-	fmt.Printf("Sent %d new local jobs via email.\n", len(filteredLocalJobs))
+	fmt.Printf("Sent %d new jobs via email.\n", (len(filteredLocalJobs) + len(filteredRemoteJobs)))
 	err = saveSentURNs(ctx, s3Client, s3Bucket, s3Key, sentURNs)
 	if err != nil {
 		return fmt.Errorf("failed to save sent URNs: %v", err)
