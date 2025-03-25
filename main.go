@@ -334,7 +334,6 @@ func handler(ctx context.Context, event Event) error {
 
 	if len(filteredRemoteJobs) == 0 {
 		fmt.Println("No new remote jobs to send.")
-		return nil
 	}
 
 	localJobs, err := FetchLinkedInJobs("local")
@@ -353,7 +352,10 @@ func handler(ctx context.Context, event Event) error {
 	filteredLocalJobs := filterResults((newLocalJobs))
 	if len(filteredLocalJobs) == 0 {
 		fmt.Println("No new local jobs to send.")
-		return nil
+	}
+
+	if len(filteredRemoteJobs) == 0 && len(filteredLocalJobs) == 0 {
+		return fmt.Errorf("no remote or local jobs to send")
 	}
 
 	sesClient := ses.NewFromConfig(cfg)
