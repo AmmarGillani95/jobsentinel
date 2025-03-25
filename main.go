@@ -11,7 +11,6 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -183,8 +182,6 @@ func saveSentURNs(ctx context.Context, s3Client *s3.Client, bucket, key string, 
 	return err
 }
 
-var applicantRE *regexp.Regexp = regexp.MustCompile(`\d+`)
-
 func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 	url := buildURL(locationType)
 	fmt.Printf("Checking jobs on %s\n", url)
@@ -230,19 +227,6 @@ func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 		if err != nil {
 			fmt.Printf("error parsing job link: %v:%v\n", urlFromHTML, err.Error())
 			return
-		}
-		applicantCount := s.Find("num-applicants__caption").Text()
-		match := applicantRE.FindString(applicantCount)
-		if match != "" {
-			applicantCountInt, err := strconv.Atoi(match)
-			if err != nil {
-				fmt.Printf("error parsing job link: %v:%v\n", urlFromHTML, err.Error())
-				return
-			}
-			if applicantCountInt > maxApplicants {
-				fmt.Printf("applicant count exceeds maximum: %d\n", applicantCountInt, err.Error())
-				return
-			}
 		}
 		job.Id = strings.TrimPrefix(urn, "urn:li:jobPosting:")
 		job.Title = strings.TrimSpace(s.Find(".base-search-card__title").Text())
