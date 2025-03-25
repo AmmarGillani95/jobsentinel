@@ -209,6 +209,14 @@ func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 	}
 	defer resp.Body.Close()
 
+	// bodyBytes, err := io.ReadAll(resp.Body)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error reading body: %w", err)
+	// }
+
+	// bodyString := string(bodyBytes)
+	// fmt.Println(bodyString)
+
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
 		fmt.Println("Error loading HTML:", err)
@@ -234,6 +242,7 @@ func FetchLinkedInJobs(locationType string) (jobs []Job, err error) {
 		job.Location = strings.TrimSpace(s.Find(".job-search-card__location").Text())
 		job.URL = linkURL
 		job.PostedAt = strings.TrimSpace(s.Find(".job-search-card__listdate").Text())
+		jobs = append(jobs, job)
 	})
 
 	return jobs, nil
@@ -324,6 +333,7 @@ func handler(ctx context.Context, event Event) error {
 
 	var newRemoteJobs []Job
 	for _, job := range remoteJobs {
+		fmt.Println("remote job", remoteJobs)
 		if !sentURNs[job.Id] {
 			newRemoteJobs = append(newRemoteJobs, job)
 			sentURNs[job.Id] = true // Mark for saving
@@ -355,7 +365,8 @@ func handler(ctx context.Context, event Event) error {
 	}
 
 	if len(filteredRemoteJobs) == 0 && len(filteredLocalJobs) == 0 {
-		return fmt.Errorf("no remote or local jobs to send")
+		fmt.Println("no remote or local jobs to send")
+		return nil
 	}
 
 	sesClient := ses.NewFromConfig(cfg)
